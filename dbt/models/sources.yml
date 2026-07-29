@@ -1,0 +1,8 @@
+version: 2
+sources:
+  - name: aurix
+    schema: aurix
+    tables:
+      - name: contas
+      - name: clientes
+      - name: transacoes

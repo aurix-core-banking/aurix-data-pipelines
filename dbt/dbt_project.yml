@@ -1,0 +1,13 @@
+name: aurix
+version: 1.0.0
+config-version: 2
+profile: aurix
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+vars:
+  schema: aurix

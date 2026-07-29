@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AUREUS - Dashboard em Tempo Real</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .metric-card {
+            background: linear-gradient(135deg, #1E40AF 0%, #3B82F6 100%);
+        }
+        .metric-card-success {
+            background: linear-gradient(135deg, #059669 0%, #10B981 100%);
+        }
+        .metric-card-warning {
+            background: linear-gradient(135deg, #F59E0B 0%, #FBBF24 100%);
+        }
+        .metric-card-danger {
+            background: linear-gradient(135deg, #DC2626 0%, #EF4444 100%);
+        }
+        .chart-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        .status-online {
+            background-color: #10B981;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+        }
+        .status-offline {
+            background-color: #EF4444;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <!-- Header -->
+    <header class="bg-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center py-6">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <h1 class="text-3xl font-bold text-gray-900">
+                            <span class="text-yellow-500">AUREUS</span> Analytics
+                        </h1>
+                        <p class="text-sm text-gray-500">Dashboard em Tempo Real</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div class="flex items-center">
+                        <span class="status-indicator status-online" id="connection-status"></span>
+                        <span class="text-sm text-gray-600" id="connection-text">Conectado</span>
+                    </div>
+                    <div class="text-sm text-gray-500">
+                        <span id="last-update">Última atualização: --</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        <!-- Métricas Principais -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="metric-card rounded-lg p-6 text-white">
+                <div class="flex items-center">
+                    <div class="flex-1">
+                        <p class="text-sm font-medium opacity-90">Transações/min</p>
+                        <p class="text-3xl font-bold" id="transacoes-por-minuto">0</p>
+                    </div>
+                    <div class="text-4xl opacity-50">📊</div>
+                </div>
+            </div>
+            
+            <div class="metric-card-success rounded-lg p-6 text-white">
+                <div class="flex items-center">
+                    <div class="flex-1">
+                        <p class="text-sm font-medium opacity-90">Valor Total/min</p>
+                        <p class="text-3xl font-bold" id="valor-total-por-minuto">R$ 0</p>
+                    </div>
+                    <div class="text-4xl opacity-50">💰</div>
+                </div>
+            </div>
+            
+            <div class="metric-card-warning rounded-lg p-6 text-white">
+                <div class="flex items-center">
+                    <div class="flex-1">
+                        <p class="text-sm font-medium opacity-90">Taxa Aprovação</p>
+                        <p class="text-3xl font-bold" id="taxa-aprovacao">0%</p>
+                    </div>
+                    <div class="text-4xl opacity-50">✅</div>
+                </div>
+            </div>
+            
+            <div class="metric-card-danger rounded-lg p-6 text-white">
+                <div class="flex items-center">
+                    <div class="flex-1">
+                        <p class="text-sm font-medium opacity-90">Score Risco</p>
+                        <p class="text-3xl font-bold" id="score-risco-medio">0.0</p>
+                    </div>
+                    <div class="text-4xl opacity-50">⚠️</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gráficos Principais -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <div class="chart-container">
+                <h3 class="text-lg font-semibold text-gray-900 mb-4">Transações por Minuto</h3>
+                <div id="chart-transacoes-por-minuto"></div>
+            </div>
+            
+            <div class="chart-container">
+                <h3 class="text-lg font-semibold text-gray-900 mb-4">Valor Total por Minuto</h3>
+                <div id="chart-valor-total-por-minuto"></div>
+            </div>
+        </div>
+
+        <!-- Gráficos Secundários -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <div class="chart-container">
+                <h3 class="text-lg font-semibold text-gray-900 mb-4">Taxa de Aprovação</h3>
+                <div id="chart-taxa-aprovacao"></div>
+            </div>
+            
+            <div class="chart-container">
+                <h3 class="text-lg font-semibold text-gray-900 mb-4">Score de Risco Médio</h3>
+                <div id="chart-score-risco-medio"></div>
+            </div>
+        </div>
+
+        <!-- Distribuições -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <div class="chart-container">
+                <h3 class="text-lg font-semibold text-gray-900 mb-4">Distribuição por Canal</h3>
+                <div id="chart-transacoes-por-canal"></div>
+            </div>
+            
+            <div class="chart-container">
+                <h3 class="text-lg font-semibold text-gray-900 mb-4">Transações por Tipo</h3>
+                <div id="chart-transacoes-por-tipo"></div>
+            </div>
+        </div>
+
+        <!-- Métricas Detalhadas -->
+        <div class="bg-white rounded-lg shadow-lg p-6">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Métricas Detalhadas</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                    <h4 class="text-sm font-medium text-gray-500 mb-2">Performance do Sistema</h4>
+                    <div class="space-y-2">
+                        <div class="flex justify-between">
+                            <span class="text-sm text-gray-600">Tempo Resposta Médio</span>
+                            <span class="text-sm font-medium" id="tempo-resposta-medio">0 ms</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-sm text-gray-600">Erros por Minuto</span>
+                            <span class="text-sm font-medium" id="erros-por-minuto">0</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div>
+                    <h4 class="text-sm font-medium text-gray-500 mb-2">Alertas de Risco</h4>
+                    <div class="space-y-2">
+                        <div class="flex justify-between">
+                            <span class="text-sm text-gray-600">Total de Alertas</span>
+                            <span class="text-sm font-medium" id="alertas-risco">0</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-sm text-gray-600">Status</span>
+                            <span class="text-sm font-medium text-green-600">Normal</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div>
+                    <h4 class="text-sm font-medium text-gray-500 mb-2">Distribuição Geográfica</h4>
+                    <div class="space-y-2" id="transacoes-por-estado">
+                        <!-- Será preenchido dinamicamente -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Configurar WebSocket
+        const socket = io();
+        
+        // Elementos DOM
+        const connectionStatus = document.getElementById('connection-status');
+        const connectionText = document.getElementById('connection-text');
+        const lastUpdate = document.getElementById('last-update');
+        
+        // Métricas principais
+        const transacoesPorMinuto = document.getElementById('transacoes-por-minuto');
+        const valorTotalPorMinuto = document.getElementById('valor-total-por-minuto');
+        const taxaAprovacao = document.getElementById('taxa-aprovacao');
+        const scoreRiscoMedio = document.getElementById('score-risco-medio');
+        
+        // Métricas detalhadas
+        const tempoRespostaMedio = document.getElementById('tempo-resposta-medio');
+        const errosPorMinuto = document.getElementById('erros-por-minuto');
+        const alertasRisco = document.getElementById('alertas-risco');
+        const transacoesPorEstado = document.getElementById('transacoes-por-estado');
+        
+        // Eventos WebSocket
+        socket.on('connect', function() {
+            connectionStatus.className = 'status-indicator status-online';
+            connectionText.textContent = 'Conectado';
+            console.log('Conectado ao servidor');
+        });
+        
+        socket.on('disconnect', function() {
+            connectionStatus.className = 'status-indicator status-offline';
+            connectionText.textContent = 'Desconectado';
+            console.log('Desconectado do servidor');
+        });
+        
+        socket.on('metrics_update', function(metrics) {
+            updateMetrics(metrics);
+            lastUpdate.textContent = `Última atualização: ${new Date().toLocaleTimeString()}`;
+        });
+        
+        socket.on('charts_update', function(charts) {
+            updateCharts(charts);
+        });
+        
+        // Função para atualizar métricas
+        function updateMetrics(metrics) {
+            transacoesPorMinuto.textContent = metrics.transacoes_por_minuto || 0;
+            valorTotalPorMinuto.textContent = `R$ ${(metrics.valor_total_por_minuto || 0).toLocaleString('pt-BR')}`;
+            taxaAprovacao.textContent = `${((metrics.taxa_aprovacao || 0) * 100).toFixed(1)}%`;
+            scoreRiscoMedio.textContent = (metrics.score_risco_medio || 0).toFixed(2);
+            
+            tempoRespostaMedio.textContent = `${Math.round(metrics.tempo_resposta_medio || 0)} ms`;
+            errosPorMinuto.textContent = metrics.erros_por_minuto || 0;
+            alertasRisco.textContent = metrics.alertas_risco || 0;
+            
+            // Atualizar distribuição por estado
+            if (metrics.transacoes_por_estado) {
+                transacoesPorEstado.innerHTML = '';
+                Object.entries(metrics.transacoes_por_estado).forEach(([estado, count]) => {
+                    const div = document.createElement('div');
+                    div.className = 'flex justify-between';
+                    div.innerHTML = `
+                        <span class="text-sm text-gray-600">${estado}</span>
+                        <span class="text-sm font-medium">${count}</span>
+                    `;
+                    transacoesPorEstado.appendChild(div);
+                });
+            }
+        }
+        
+        // Função para atualizar gráficos
+        function updateCharts(charts) {
+            Object.keys(charts).forEach(chartId => {
+                const chartElement = document.getElementById(`chart-${chartId}`);
+                if (chartElement && charts[chartId]) {
+                    try {
+                        const chartData = JSON.parse(charts[chartId]);
+                        Plotly.newPlot(chartElement, chartData.data, chartData.layout, {responsive: true});
+                    } catch (error) {
+                        console.error(`Erro ao renderizar gráfico ${chartId}:`, error);
+                    }
+                }
+            });
+        }
+        
+        // Solicitar dados iniciais
+        socket.emit('request_metrics');
+        socket.emit('request_charts');
+        
+        // Atualizar dados a cada 30 segundos
+        setInterval(() => {
+            socket.emit('request_metrics');
+            socket.emit('request_charts');
+        }, 30000);
+        
+        // Função para formatar números
+        function formatNumber(num) {
+            return new Intl.NumberFormat('pt-BR').format(num);
+        }
+        
+        // Função para formatar moeda
+        function formatCurrency(num) {
+            return new Intl.NumberFormat('pt-BR', {
+                style: 'currency',
+                currency: 'BRL'
+            }).format(num);
+        }
+    </script>
+</body>
+</html>
