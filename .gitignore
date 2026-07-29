@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.venv
+env/
+venv/
+
+# Data
+*.db
+*.sqlite
+
+# Logs
+*.log
+logs/
+
+# Spark
+spark-warehouse/
+metastore_db/
+
+# Airflow
+airflow.cfg
+airflow.db
+webserver_config.py
+
+# Temp
+tmp/
+temp/
+*.tmp
+*.pid
