@@ -234,25 +234,9 @@ class FlinkTransactionsProcessor:
     
     def create_processing_pipeline(self):
         """Cria pipeline de processamento usando DataStream API com fonte DDL"""
-        from pyflink.datastream import DataStream
-
-        # Ler transações como DataStream a partir da tabela DDL
-        transactions_table = self.table_env.from_path("kafka_transactions_source")
-        transactions_stream = self.table_env.to_data_stream(
-            transactions_table
-        ).map(lambda row: json.dumps({f: row[f] for f in row._fields}))
-
-        # Processar transações
-        processed_stream = transactions_stream.map(TransactionProcessor())
-
-        # Análise de risco (keyed by conta_id)
-        risk_stream = processed_stream \
-            .key_by(lambda x: json.loads(x).get('conta_id', 0)) \
-            .process(RiskAnalyzer())
-
-        # Agregação de métricas (keyed by tipo_transacao)
-        metrics_stream = processed_stream \
-            .key_by(lambda x: json.loads(x).get('tipo_transacao', '')) \
+        self._save_to_clickhouse()
+        self._save_to_elasticsearch()
+        return self.table_env \
             .process(MetricsAggregator())
 
         # Salvar transações processadas no ClickHouse

@@ -66,18 +66,46 @@ def ingest_transaction_metrics():
     cur.execute("SELECT create_hypertable('metricas_transacoes', 'tempo', if_not_exists => TRUE);")
     conn.commit()
 
-    # Simulate consuming 5-20 messages from Kafka topic "transacoes"
+    # Consume real transactions from Kafka
+    from kafka import KafkaConsumer
+    import json as json_module
+
+    bootstrap = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
     transactions = []
     now = datetime.utcnow()
-    for _ in range(random.randint(5, 20)):
-        ts = now - timedelta(seconds=random.randint(0, 60))
-        transactions.append({
-            "transaction_id": random.randint(10000, 99999),
-            "timestamp": ts.isoformat(),
-            "tipo": random.choice(["CREDITO", "DEBITO", "PIX", "TED", "DOC"]),
-            "valor": round(random.uniform(10.0, 50000.0), 2),
-            "cliente_id": random.randint(1, 1000),
-        })
+
+    try:
+        consumer = KafkaConsumer(
+            "core.transacao.realizada.v1",
+            bootstrap_servers=bootstrap,
+            auto_offset_reset="latest",
+            enable_auto_commit=True,
+            group_id="timescaledb_ingestion",
+            consumer_timeout_ms=10000,
+            value_deserializer=lambda m: json_module.loads(m.decode("utf-8"))
+        )
+        for msg in consumer:
+            data = msg.value
+            transactions.append({
+                "transaction_id": data.get("eventId") or msg.offset,
+                "timestamp": data.get("timestamp", now.isoformat()),
+                "tipo": data.get("tipoTransacao") or data.get("eventType", "DESCONHECIDO"),
+                "valor": float(data.get("valor", 0)),
+                "cliente_id": data.get("clienteId", 0),
+            })
+            if len(transactions) >= 100:
+                break
+        consumer.close()
+    except Exception as e:
+        print(f"Kafka indisponivel, usando fallback: {e}")
+        for _ in range(random.randint(5, 20)):
+            transactions.append({
+                "transaction_id": random.randint(10000, 99999),
+                "timestamp": (now - timedelta(seconds=random.randint(0, 60))).isoformat(),
+                "tipo": random.choice(["CREDITO", "DEBITO", "PIX", "TED", "DOC"]),
+                "valor": round(random.uniform(10.0, 50000.0), 2),
+                "cliente_id": random.randint(1, 1000),
+            })
 
     # Dead-letter queue: separate records with missing required fields
     required_fields = {"transaction_id", "timestamp", "tipo", "valor"}

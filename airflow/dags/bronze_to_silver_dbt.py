@@ -11,10 +11,10 @@ with DAG(
 ) as dag:
     run_dbt = BashOperator(
         task_id="dbt_run",
-        bash_command="cd /opt/airflow/dbt && dbt run --target prod 2>/dev/null || echo 'dbt not configured'",
+        bash_command="cd /opt/airflow/dbt && dbt run --target prod",
     )
     test_dbt = BashOperator(
         task_id="dbt_test",
-        bash_command="cd /opt/airflow/dbt && dbt test --target prod 2>/dev/null || true",
+        bash_command="cd /opt/airflow/dbt && dbt test --target prod",
     )
     run_dbt >> test_dbt
