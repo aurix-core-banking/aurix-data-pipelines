@@ -6,33 +6,24 @@ DAG de reconciliação contábil: core banking (PostgreSQL) vs data lake.
 - `reconciliar_transacoes`: total por dia.
 - `reconciliar_pix`: total via BACEN SPI (integração mockada).
 - Em caso de divergência acima do limiar, a tarefa falha e o alerta dispara.
+
+A lógica de comparação vive em ``reconciliation.engine`` (testável sem Airflow).
 """
 
 from datetime import datetime, timedelta
-import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
 from alertas_aurix import notificar_falha, notificar_sucesso
 
-LIMIAR_DIVERGENCIA_PCT = float(os.environ.get("RECONCILIACAO_LIMIAR_PCT", "0.01"))
+from reconciliation.engine import verificar_divergencias
+
 logger = logging.getLogger(__name__)
-
-
-def _persistir_relatorio(base_dir: str, nome: str, resultado: Dict[str, Any]) -> None:
-    """Persiste o relatório de reconciliação para o exporter Prometheus."""
-    dir_relatorios = Path(base_dir) / "artifacts" / "reconciliation"
-    dir_relatorios.mkdir(parents=True, exist_ok=True)
-    resultado["timestamp"] = datetime.utcnow().isoformat() + "Z"
-    caminho = dir_relatorios / nome
-    with open(caminho, "w", encoding="utf-8") as f:
-        json.dump(resultado, f, indent=2)
-    logger.info("Relatório de reconciliação salvo em %s", caminho)
 
 
 def _dir_relatorios() -> str:
@@ -61,22 +52,6 @@ def _config() -> Dict[str, Any]:
     }
 
 
-def _query_pg(cur, sql: str, params: tuple = ()) -> List[tuple]:
-    cur.execute(sql, params)
-    return cur.fetchall()
-
-
-def _query_clickhouse(client, sql: str) -> List[tuple]:
-    result = client.query(sql)
-    return result.result_rows
-
-
-def _divergencia_percentual(esperado, obtido) -> float:
-    if esperado == 0:
-        return 0.0 if obtido == 0 else 100.0
-    return abs(esperado - obtido) / abs(esperado) * 100.0
-
-
 def reconciliar_saldos() -> Dict[str, Any]:
     import psycopg2
     import clickhouse_connect
@@ -84,48 +59,13 @@ def reconciliar_saldos() -> Dict[str, Any]:
     cfg = _config()
     conn = psycopg2.connect(**cfg["postgres"])
     client = clickhouse_connect.get_client(**cfg["clickhouse"])
-    cur = conn.cursor()
-    resultado = {"tabelas": [], "divergencias": 0}
+    try:
+        from reconciliation.engine import reconciliar_saldos as _reconciliar_saldos
 
-    tabelas = [
-        ("contas", "saldo"),
-        ("clientes", None),
-        ("transacoes", "valor"),
-    ]
-    for tabela, coluna_valor in tabelas:
-        try:
-            pg_rows = _query_pg(cur, f"SELECT COUNT(*) FROM aurix.{tabela}")
-            ch_rows = _query_clickhouse(client, f"SELECT COUNT(*) FROM {tabela}_analytics")
-            pg_total = pg_rows[0][0]
-            ch_total = ch_rows[0][0]
-            divergencias = [_divergencia_percentual(pg_total, ch_total)]
-            tabela_resultado = {
-                "tabela": tabela,
-                "pg_total": pg_total,
-                "ch_total": ch_total,
-            }
-            if coluna_valor:
-                pg_valor = _query_pg(
-                    cur, f"SELECT COALESCE(SUM({coluna_valor}), 0) FROM aurix.{tabela}"
-                )[0][0]
-                ch_valor = _query_clickhouse(
-                    client, f"SELECT COALESCE(SUM({coluna_valor}), 0) FROM {tabela}_analytics"
-                )[0][0]
-                tabela_resultado.update(pg_valor=pg_valor, ch_valor=ch_valor)
-                divergencias.append(_divergencia_percentual(pg_valor, ch_valor))
-            tabela_resultado["divergencia_pct_max"] = max(divergencias)
-            resultado["tabelas"].append(tabela_resultado)
-            if max(divergencias) > LIMIAR_DIVERGENCIA_PCT:
-                resultado["divergencias"] += 1
-        except Exception as e:  # noqa: BLE001
-            resultado["tabelas"].append({"tabela": tabela, "erro": str(e)})
-            resultado["divergencias"] += 1
-    cur.close()
-    conn.close()
-    _persistir_relatorio(_dir_relatorios(), "reconciliacao_saldos.json", resultado)
-    if resultado["divergencias"]:
-        raise RuntimeError(f"Divergências de saldos detectadas: {resultado}")
-    return resultado
+        resultado = _reconciliar_saldos(conn, client, _dir_relatorios())
+    finally:
+        conn.close()
+    return verificar_divergencias(resultado, "saldos")
 
 
 def reconciliar_transacoes() -> Dict[str, Any]:
@@ -135,65 +75,21 @@ def reconciliar_transacoes() -> Dict[str, Any]:
     cfg = _config()
     conn = psycopg2.connect(**cfg["postgres"])
     client = clickhouse_connect.get_client(**cfg["clickhouse"])
-    cur = conn.cursor()
-    resultado = {"por_dia": [], "divergencias": 0}
-
     try:
-        pg_rows = _query_pg(
-            cur,
-            "SELECT data_atualizacao::date AS dia, COUNT(*), COALESCE(SUM(valor), 0) "
-            "FROM aurix.transacoes "
-            "WHERE data_atualizacao >= NOW() - INTERVAL '7 days' "
-            "GROUP BY dia ORDER BY dia",
-        )
-        ch_rows = _query_clickhouse(
-            client,
-            "SELECT toDate(data_atualizacao) AS dia, COUNT(*), COALESCE(SUM(valor), 0) "
-            "FROM transacoes_analytics "
-            "WHERE data_atualizacao >= now() - INTERVAL 7 DAY "
-            "GROUP BY dia ORDER BY dia",
-        )
-        pg_map = {(str(r[0])): r for r in pg_rows}
-        ch_map = {(str(r[0])): r for r in ch_rows}
-        for dia in sorted(set(pg_map) | set(ch_map)):
-            pg = pg_map.get(dia, (dia, 0, 0))
-            ch = ch_map.get(dia, (dia, 0, 0))
-            div = _divergencia_percentual(pg[1], ch[1])
-            resultado["por_dia"].append(
-                {"dia": dia, "pg": pg[1], "ch": ch[1], "divergencia_pct": div}
-            )
-            if div > LIMIAR_DIVERGENCIA_PCT:
-                resultado["divergencias"] += 1
-    except Exception as e:  # noqa: BLE001
-        resultado["divergencias"] += 1
-        resultado["erro"] = str(e)
-    finally:
-        cur.close()
-        conn.close()
+        from reconciliation.engine import reconciliar_transacoes as _reconciliar_transacoes
 
-    _persistir_relatorio(_dir_relatorios(), "reconciliacao_transacoes.json", resultado)
-    if resultado["divergencias"]:
-        raise RuntimeError(f"Divergências de transações detectadas: {resultado}")
-    return resultado
+        resultado = _reconciliar_transacoes(conn, client, _dir_relatorios())
+    finally:
+        conn.close()
+    return verificar_divergencias(resultado, "transações")
 
 
 def reconciliar_pix() -> Dict[str, Any]:
-    import requests
+    from reconciliation.engine import reconciliar_pix as _reconciliar_pix
 
     bacen_mock = os.environ.get("BACEN_MOCK_URL", "http://bacen-mock:8095")
-    resultado = {"divergencias": 0}
-    try:
-        resp = requests.get(f"{bacen_mock}/spi/consolidado", timeout=10)
-        resp.raise_for_status()
-        # Pacote SPI de referência para comparação; mock retorna o consolidado.
-        resultado["spi_consolidado"] = resp.json()
-        _persistir_relatorio(_dir_relatorios(), "reconciliacao_pix.json", resultado)
-    except Exception as e:  # noqa: BLE001
-        resultado["divergencias"] += 1
-        resultado["erro"] = str(e)
-        _persistir_relatorio(_dir_relatorios(), "reconciliacao_pix.json", resultado)
-        raise RuntimeError(f"Divergência de PIX/BACEN SPI detectada: {resultado}")
-    return resultado
+    resultado = _reconciliar_pix(bacen_mock, _dir_relatorios())
+    return verificar_divergencias(resultado, "PIX")
 
 
 default_args = {
