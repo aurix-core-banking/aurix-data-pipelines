@@ -9,7 +9,10 @@ DAG de reconciliação contábil: core banking (PostgreSQL) vs data lake.
 """
 
 from datetime import datetime, timedelta
+import json
+import logging
 import os
+from pathlib import Path
 from typing import Any, Dict, List
 
 from airflow import DAG
@@ -18,6 +21,25 @@ from airflow.operators.python import PythonOperator
 from alertas_aurix import notificar_falha, notificar_sucesso
 
 LIMIAR_DIVERGENCIA_PCT = float(os.environ.get("RECONCILIACAO_LIMIAR_PCT", "0.01"))
+logger = logging.getLogger(__name__)
+
+
+def _persistir_relatorio(base_dir: str, nome: str, resultado: Dict[str, Any]) -> None:
+    """Persiste o relatório de reconciliação para o exporter Prometheus."""
+    dir_relatorios = Path(base_dir) / "artifacts" / "reconciliation"
+    dir_relatorios.mkdir(parents=True, exist_ok=True)
+    resultado["timestamp"] = datetime.utcnow().isoformat() + "Z"
+    caminho = dir_relatorios / nome
+    with open(caminho, "w", encoding="utf-8") as f:
+        json.dump(resultado, f, indent=2)
+    logger.info("Relatório de reconciliação salvo em %s", caminho)
+
+
+def _dir_relatorios() -> str:
+    return os.environ.get(
+        "RECONCILIACAO_REPORTS_DIR",
+        str(Path(__file__).resolve().parents[2]),
+    )
 
 
 def _config() -> Dict[str, Any]:
@@ -100,6 +122,7 @@ def reconciliar_saldos() -> Dict[str, Any]:
             resultado["divergencias"] += 1
     cur.close()
     conn.close()
+    _persistir_relatorio(_dir_relatorios(), "reconciliacao_saldos.json", resultado)
     if resultado["divergencias"]:
         raise RuntimeError(f"Divergências de saldos detectadas: {resultado}")
     return resultado
@@ -148,6 +171,7 @@ def reconciliar_transacoes() -> Dict[str, Any]:
         cur.close()
         conn.close()
 
+    _persistir_relatorio(_dir_relatorios(), "reconciliacao_transacoes.json", resultado)
     if resultado["divergencias"]:
         raise RuntimeError(f"Divergências de transações detectadas: {resultado}")
     return resultado
@@ -163,9 +187,11 @@ def reconciliar_pix() -> Dict[str, Any]:
         resp.raise_for_status()
         # Pacote SPI de referência para comparação; mock retorna o consolidado.
         resultado["spi_consolidado"] = resp.json()
+        _persistir_relatorio(_dir_relatorios(), "reconciliacao_pix.json", resultado)
     except Exception as e:  # noqa: BLE001
         resultado["divergencias"] += 1
         resultado["erro"] = str(e)
+        _persistir_relatorio(_dir_relatorios(), "reconciliacao_pix.json", resultado)
         raise RuntimeError(f"Divergência de PIX/BACEN SPI detectada: {resultado}")
     return resultado
 

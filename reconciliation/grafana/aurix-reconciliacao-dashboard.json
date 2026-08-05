@@ -1,0 +1,134 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Aurix - Reconciliação Contábil (data pipelines)",
+    "uid": "aurix-reconciliacao",
+    "tags": ["aurix", "reconciliacao", "compliance"],
+    "style": "dark",
+    "timezone": "browser",
+    "schemaVersion": 37,
+    "version": 1,
+    "templating": {
+      "list": []
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Status da reconciliação",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "aurix_reconciliacao_ok == 1",
+            "legendFormat": "OK",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "thresholds" },
+            "thresholds": {
+              "steps": [
+                { "color": "red", "value": 0 },
+                { "color": "green", "value": 1 }
+              ]
+            }
+          }
+        },
+        "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 }
+      },
+      {
+        "id": 2,
+        "title": "Última execução",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "aurix_reconciliacao_ultima_execucao",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "dateTimeAsIso",
+            "color": { "mode": "fixed", "fixedColor": "blue" }
+          }
+        },
+        "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 }
+      },
+      {
+        "id": 3,
+        "title": "Divergências por escopo",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "aurix_reconciliacao_divergencias_total",
+            "legendFormat": "{{escopo}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "thresholds" },
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": 0 },
+                { "color": "yellow", "value": 1 },
+                { "color": "red", "value": 2 }
+              ]
+            }
+          }
+        },
+        "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 }
+      },
+      {
+        "id": 4,
+        "title": "Divergência percentual por escopo",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "aurix_reconciliacao_divergencia_pct",
+            "legendFormat": "{{escopo}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "color": { "mode": "palette-classic" },
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": 0 }
+              ]
+            }
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 }
+      },
+      {
+        "id": 5,
+        "title": "Alertas de reconciliação",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "count(ALERTS{alertname=~\"Reconciliacao.*\"} == 1)",
+            "legendFormat": "Ativos",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "thresholds" },
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": 0 },
+                { "color": "red", "value": 1 }
+              ]
+            }
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 }
+      }
+    ]
+  },
+  "overwrite": true
+}
