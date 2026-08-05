@@ -15,6 +15,7 @@ DAGS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 
 DAG_ARQUIVOS = [
     "ingest_postgres_to_bronze.py",
+    "ingest_kafka_to_bronze.py",
     "bronze_to_silver_dbt.py",
     "silver_to_gold_dbt.py",
     "sync_clickhouse.py",
@@ -86,6 +87,10 @@ def test_dag_define_alertas(arquivo):
             "reconciliacao_contabil.py",
             ["reconciliar_saldos", "reconciliar_transacoes", "reconciliar_pix"],
         ),
+        (
+            "ingest_kafka_to_bronze.py",
+            ["ingestao_cdc_kafka_bronze"],
+        ),
         ("silver_to_gold_dbt.py", ["dbt_run_gold", "dbt_test_gold"]),
         ("bronze_to_silver_dbt.py", ["dbt_run_silver", "dbt_test_silver"]),
     ],
@@ -110,6 +115,7 @@ def test_dag_arquivo_sintaxe_valida(arquivo):
     "modulo,funs",
     [
         ("ingestion.pg_to_bronze", ["main"]),
+        ("ingestion.kafka_to_bronze", ["main"]),
         ("compliance.data_compliance", ["LGPDCompliance", "DataAuditor"]),
         ("sync.postgres_to_clickhouse", ["PostgresToClickHouseSync"]),
     ],

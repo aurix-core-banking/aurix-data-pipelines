@@ -24,6 +24,7 @@ As DAGs ficam em `airflow/dags/` e são testadas via `pytest` (dagbag) em
 | DAG | Função | Horário |
 |---|---|---|
 | `ingest_postgres_to_bronze` | Ingestão incremental PostgreSQL → Bronze (watermark) | 00:00 |
+| `ingest_kafka_to_bronze` | Ingestão de CDC (Debezium) Kafka → Bronze (modo batch) | a cada 15 min |
 | `bronze_to_silver_dbt` | dbt Bronze → Silver (run + test) | 01:00 |
 | `silver_to_gold_dbt` | dbt Silver → Gold (run + test) | 02:00 |
 | `sync_clickhouse` | Sync PostgreSQL → ClickHouse (pós-Gold) | 03:00 |
@@ -34,6 +35,29 @@ As DAGs ficam em `airflow/dags/` e são testadas via `pytest` (dagbag) em
 
 - `market_data_ingestion` — indicadores BCB (CDI, SELIC, IPCA) e Tesouro Direto → TimescaleDB (20:00, dias úteis)
 - `timescaledb_ingestion` — métricas de transações (Kafka) e métricas de sistema → TimescaleDB (a cada minuto)
+
+### Ingestão de CDC (Debezium)
+
+A DAG `ingest_kafka_to_bronze` consome os tópicos `cdc.aurix.*` (contas, clientes,
+transacoes, pix_pagamentos) publicados pelo Kafka Connect (Debezium) e grava Parquet
+no bucket `aurix-bronze` em `cdc/<tabela>/<ano>/<mês>/<dia>/`. O script é
+`ingestion/kafka_to_bronze.py`:
+
+```bash
+# Modo batch (uma execução, útil no Airflow)
+python ingestion/kafka_to_bronze.py --once
+
+# Com limite de mensagens
+python ingestion/kafka_to_bronze.py --once --max-messages 5000
+```
+
+Variáveis de ambiente relevantes: `KAFKA_BOOTSTRAP_SERVERS`, `CDC_TOPICS`,
+`CDC_MAX_MESSAGES`, `CDC_CONSUMER_GROUP`, `BRONZE_BUCKET`, `MINIO_ENDPOINT`,
+`MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`.
+
+Os registros são enriquecidos com `_cdc_op` (c/u/d), `_cdc_ts` (ISO UTC) e
+`_cdc_deleted` (true para DELETE). Os offsets são commitados após cada mensagem,
+garantindo no mínimo uma vez entrega sem perda.
 
 ### Alertas
 
