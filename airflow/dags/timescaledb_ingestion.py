@@ -21,6 +21,8 @@ import os
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
+from alertas_aurix import notificar_falha, notificar_sucesso
+
 default_args = {
     "owner": "aurix",
     "depends_on_past": False,
@@ -28,6 +30,7 @@ default_args = {
     "email_on_retry": False,
     "retries": 3,
     "retry_delay": timedelta(minutes=1),
+    "on_failure_callback": notificar_falha,
 }
 
 
@@ -227,11 +230,13 @@ dag = DAG(
 PythonOperator(
     task_id="ingest_transaction_metrics",
     python_callable=ingest_transaction_metrics,
+    on_success_callback=notificar_sucesso,
     dag=dag,
 )
 
 PythonOperator(
     task_id="sync_system_metrics",
     python_callable=sync_system_metrics,
+    on_success_callback=notificar_sucesso,
     dag=dag,
 )

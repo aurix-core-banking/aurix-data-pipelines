@@ -1,4 +1,4 @@
-"""DAG de processamento dbt Bronze -> Silver (pós-ingestão)."""
+"""DAG de transformação dbt Silver -> Gold (pós-ingestão)."""
 
 from datetime import datetime, timedelta
 from airflow import DAG
@@ -17,19 +17,19 @@ default_args = {
 }
 
 with DAG(
-    dag_id="bronze_to_silver_dbt",
+    dag_id="silver_to_gold_dbt",
     default_args=default_args,
-    schedule="0 1 * * *",
+    schedule="0 2 * * *",
     start_date=datetime(2026, 1, 1),
     catchup=False,
-    tags=["aurix", "silver", "dbt"],
+    tags=["aurix", "gold", "dbt"],
 ) as dag:
     run_dbt = BashOperator(
-        task_id="dbt_run_silver",
-        bash_command="cd /opt/airflow/dbt && dbt run --target prod --select +silver",
+        task_id="dbt_run_gold",
+        bash_command="cd /opt/airflow/dbt && dbt run --target prod --select gold",
     )
     test_dbt = BashOperator(
-        task_id="dbt_test_silver",
-        bash_command="cd /opt/airflow/dbt && dbt test --target prod --select +silver",
+        task_id="dbt_test_gold",
+        bash_command="cd /opt/airflow/dbt && dbt test --target prod --select gold",
     )
     run_dbt >> test_dbt
