@@ -58,6 +58,29 @@ python -m pytest airflow/tests
 - `sync/` — PostgreSQL → ClickHouse (replicação)
 - `compliance/` — LGPD, auditoria e relatórios BACEN
 - `analytics/` — dashboard analítico em tempo real
+- `reconciliation/` — reconciliação contábil: exporter Prometheus e dashboard Grafana
+
+## Reconciliação contábil
+
+A DAG `reconciliacao_contabil` (05:00) compara core banking (PostgreSQL) vs data
+lake (ClickHouse): saldos por conta, transações por dia e PIX/BACEN SPI. Quando
+a divergência ultrapassa `RECONCILIACAO_LIMIAR_PCT` (padrão 0.01%), a tarefa
+falha e os alertas do `alertas_aurix.py` são disparados.
+
+Os relatórios são persistidos em `artifacts/reconciliation/*.json` e expostos
+como métricas Prometheus (`aurix_reconciliacao_*`) pelo exporter:
+
+```bash
+cd reconciliation
+pip install -r requirements.txt
+python -m reconciliation.exporter --once          # textfile (node_exporter)
+python -m reconciliation.exporter --port 9102     # HTTP scrape
+```
+
+O dashboard `reconciliation/grafana/aurix-reconciliacao-dashboard.json`
+monitora status, divergências por escopo e alertas. As regras de alerta
+(`ReconciliacaoDivergencias`, `ReconciliacaoAusente`) e o job `reconciliacao`
+no Prometheus ficam em `aurix-infrastructure`.
 
 ## Relacionados
 
