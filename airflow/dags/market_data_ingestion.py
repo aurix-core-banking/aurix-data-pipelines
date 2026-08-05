@@ -14,6 +14,8 @@ from airflow.operators.python import PythonOperator
 
 import requests
 
+from alertas_aurix import notificar_falha, notificar_sucesso
+
 log = logging.getLogger(__name__)
 
 BCB_API_BASE = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.{}/dados?formato=json"
@@ -35,6 +37,7 @@ default_args = {
     "email_on_retry": False,
     "retries": 2,
     "retry_delay": timedelta(minutes=2),
+    "on_failure_callback": notificar_falha,
 }
 
 
@@ -182,11 +185,13 @@ dag = DAG(
 PythonOperator(
     task_id="ingest_market_indicators",
     python_callable=ingest_market_indicators,
+    on_success_callback=notificar_sucesso,
     dag=dag,
 )
 
 PythonOperator(
     task_id="ingest_bond_prices",
     python_callable=ingest_bond_prices,
+    on_success_callback=notificar_sucesso,
     dag=dag,
 )

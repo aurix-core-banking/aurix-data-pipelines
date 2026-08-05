@@ -1,52 +1,43 @@
-from datetime import datetime
+"""
+DAG de ingestão PostgreSQL -> Bronze (diária, incremental).
+
+Executa o script ingestion/pg_to_bronze.py, que realiza a leitura incremental
+das tabelas do core banking para o data lake (bronze) via watermark.
+"""
+
+from datetime import datetime, timedelta
 import os
+
 from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.operators.bash import BashOperator
 
-def run_pg_to_bronze():
-    import pandas as pd
-    import boto3
-    from sqlalchemy import create_engine
-    from io import BytesIO
-    pg_url = os.environ.get(
-        "PG_BRONZE_URL",
-        "postgresql+psycopg2://aurix_user:aurix_secure_password@postgres:5432/aurix"
-    )
-    engine = create_engine(pg_url)
-    endpoint = os.environ.get("MINIO_ENDPOINT", "http://minio:9000")
-    access_key = os.environ.get("MINIO_ACCESS_KEY", "aurix_admin")
-    secret_key = os.environ.get("MINIO_SECRET_KEY", "aurix_secure_password")
-    bucket = os.environ.get("BRONZE_BUCKET", "aurix-bronze")
-    tables = ["contas", "clientes", "transacoes"]
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=endpoint,
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        region_name="us-east-1",
-    )
-    prefix = datetime.now().strftime("%Y/%m/%d")
-    for table in tables:
-        try:
-            df = pd.read_sql_table(table, engine, schema=os.environ.get("PG_SCHEMA", "aurix"))
-            buf = BytesIO()
-            df.to_parquet(buf, index=False)
-            buf.seek(0)
-            key = f"postgres/{table}/{prefix}/{table}.parquet"
-            s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
-            print(f"Wrote {bucket}/{key} ({len(df)} rows)")
-        except Exception as e:
-            print(f"Skip {table}: {e}")
+from alertas_aurix import notificar_falha, notificar_sucesso
 
-dag = DAG(
+default_args = {
+    "owner": "aurix",
+    "depends_on_past": False,
+    "email_on_failure": False,
+    "email_on_retry": False,
+    "retries": 2,
+    "retry_delay": timedelta(minutes=5),
+    "on_failure_callback": notificar_falha,
+}
+
+COMANDO_INGESTAO = (
+    "cd /opt/airflow/ingestion && python pg_to_bronze.py --incremental"
+)
+
+with DAG(
     dag_id="ingest_postgres_to_bronze",
-    schedule_interval="@daily",
+    default_args=default_args,
+    schedule="0 0 * * *",
     start_date=datetime(2026, 1, 1),
     catchup=False,
     tags=["aurix", "bronze", "ingestion"],
-)
-PythonOperator(
-    task_id="pg_to_bronze",
-    python_callable=run_pg_to_bronze,
-    dag=dag,
-)
+) as dag:
+    ingestao = BashOperator(
+        task_id="ingestao_postgres_bronze",
+        bash_command=COMANDO_INGESTAO,
+        on_success_callback=notificar_sucesso,
+        dag=dag,
+    )
