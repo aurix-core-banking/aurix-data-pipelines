@@ -1,113 +1,89 @@
 # Aurix Data Pipelines
 
-Pipelines ETL e streaming da plataforma Aurix.
-
-## Visão Geral
-
-Pipelines que processam transações financeiras, agregam métricas e alimentam a
-camada analítica (ClickHouse) a partir do core banking (PostgreSQL).
+Data lakehouse com Spark, Airflow, MinIO, dbt, Great Expectations, Feast Feature Store e OpenLineage.
 
 ## Stack
 
-- Apache Spark / PySpark
-- Apache Kafka
-- Airflow (orquestração)
-- Python
+- **Apache Spark** (PySpark Structured Streaming + batch)
+- **Apache Airflow** (orquestração — 13 DAGs)
+- **MinIO** (S3-compatible — bronze/silver/gold)
+- **dbt** (transformações SQL)
+- **Great Expectations** (data quality)
+- **Feast** (feature store para ML)
+- **OpenLineage + Marquez** (data lineage)
+- **Python** + **PySpark** + **Kafka** + **ClickHouse**
 
-## Orquestração (Airflow)
+## Arquitetura Medallion
 
-As DAGs ficam em `airflow/dags/` e são testadas via `pytest` (dagbag) em
-`airflow/tests/`. Dependências em `airflow/requirements.txt`.
+```
+PostgreSQL ──┐
+             ├──→ Bronze (MinIO Parquet) ──→ Silver (dbt) ──→ Gold (dbt)
+Kafka CDC ───┘                                    │
+                                                  ├──→ ClickHouse (OLAP)
+                                                  ├──→ TimescaleDB (time-series)
+                                                  └──→ Grafana (dashboards)
+```
 
-### Pipeline diário
+## Airflow DAGs
 
 | DAG | Função | Horário |
 |---|---|---|
-| `ingest_postgres_to_bronze` | Ingestão incremental PostgreSQL → Bronze (watermark) | 00:00 |
-| `ingest_kafka_to_bronze` | Ingestão de CDC (Debezium) Kafka → Bronze (modo batch) | a cada 15 min |
+| `ingest_postgres_to_bronze` | Ingestão incremental PG → Bronze | 00:00 |
+| `data_quality_check` | Quality checks (Great Expectations) | 00:30 |
+| `ingest_kafka_to_bronze` | CDC Debezium Kafka → Bronze | a cada 15 min |
 | `bronze_to_silver_dbt` | dbt Bronze → Silver (run + test) | 01:00 |
 | `silver_to_gold_dbt` | dbt Silver → Gold (run + test) | 02:00 |
-| `sync_clickhouse` | Sync PostgreSQL → ClickHouse (pós-Gold) | 03:00 |
-| `compliance_lgpd` | Relatório LGPD + purga de dados expirados | 04:00 |
-| `reconciliacao_contabil` | Reconciliação core banking vs data lake (saldos, transações, PIX/SPI) | 05:00 |
+| `feature_materialization` | Feast feature materialization | 03:00 |
+| `sync_clickhouse` | PostgreSQL → ClickHouse | 03:30 |
+| `compliance_lgpd` | LGPD report + purge | 04:00 |
+| `reconciliacao_contabil` | Core banking vs data lake | 05:00 |
+| `timescaledb_ingestion` | Kafka → TimescaleDB | a cada 1 min |
+| `market_data_ingestion` | BCB API → TimescaleDB | 20:00 (dias úteis) |
 
-### Outras DAGs
+## Módulos
 
-- `market_data_ingestion` — indicadores BCB (CDI, SELIC, IPCA) e Tesouro Direto → TimescaleDB (20:00, dias úteis)
-- `timescaledb_ingestion` — métricas de transações (Kafka) e métricas de sistema → TimescaleDB (a cada minuto)
+| Módulo | Descrição |
+|---|---|
+| `ingestion/` | PostgreSQL → Bronze (Parquet), Kafka CDC → Bronze |
+| `spark/` | PySpark Structured Streaming (transações analytics) |
+| `dbt/` | Modelos staging/silver/gold (9 models) |
+| `sync/` | PostgreSQL → ClickHouse (replicação) |
+| `compliance/` | LGPD, auditoria, relatórios BACEN |
+| `analytics/` | Dashboard real-time (Flask + SocketIO + Plotly) |
+| `reconciliation/` | Reconciliação contábil + Prometheus exporter |
+| `governance/` | DataHub ingestor (catálogo automático) |
+| `data-quality/` | Great Expectations suites + DataQualityEngine |
+| `lineage/` | OpenLineage + Marquez collector |
+| `feature-store/` | Feast (4 feature views, 48 features ML) |
 
-### Ingestão de CDC (Debezium)
-
-A DAG `ingest_kafka_to_bronze` consome os tópicos `cdc.aurix.*` (contas, clientes,
-transacoes, pix_pagamentos) publicados pelo Kafka Connect (Debezium) e grava Parquet
-no bucket `aurix-bronze` em `cdc/<tabela>/<ano>/<mês>/<dia>/`. O script é
-`ingestion/kafka_to_bronze.py`:
+## Data Quality
 
 ```bash
-# Modo batch (uma execução, útil no Airflow)
-python ingestion/kafka_to_bronze.py --once
+# Rodar todos os checks
+python data-quality/great_expectations_runner.py
 
-# Com limite de mensagens
-python ingestion/kafka_to_bronze.py --once --max-messages 5000
+# Checks específicos
+python data-quality/great_expectations_runner.py --tables contas,transacoes
 ```
 
-Variáveis de ambiente relevantes: `KAFKA_BOOTSTRAP_SERVERS`, `CDC_TOPICS`,
-`CDC_MAX_MESSAGES`, `CDC_CONSUMER_GROUP`, `BRONZE_BUCKET`, `MINIO_ENDPOINT`,
-`MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`.
+## Reconciliação
 
-Os registros são enriquecidos com `_cdc_op` (c/u/d), `_cdc_ts` (ISO UTC) e
-`_cdc_deleted` (true para DELETE). Os offsets são commitados após cada mensagem,
-garantindo no mínimo uma vez entrega sem perda.
+```bash
+cd reconciliation
+python -m reconciliation.exporter --port 9102  # HTTP scrape
+```
 
-### Alertas
-
-Todas as DAGs usam callbacks de falha/sucesso do módulo `alertas_aurix.py`
-(Slack + e-mail). Configuração por variáveis de ambiente:
-
-- `SLACK_WEBHOOK_URL` — webhook do Slack
-- `ALERTAS_EMAIL_TO` — destinatário(s) de e-mail (separados por vírgula)
-
-### Testes
+## Testes
 
 ```bash
 pip install -r airflow/requirements.txt
 python -m pytest airflow/tests
+python -m pytest ingestion/test_*.py
+python -m pytest reconciliation/test_*.py
 ```
-
-## Módulos
-
-- `ingestion/` — PostgreSQL → Bronze (Parquet no MinIO)
-- `spark/` — processamento de transações (streaming/batch)
-- `dbt/` — modelos staging → silver → gold
-- `sync/` — PostgreSQL → ClickHouse (replicação)
-- `compliance/` — LGPD, auditoria e relatórios BACEN
-- `analytics/` — dashboard analítico em tempo real
-- `reconciliation/` — reconciliação contábil: exporter Prometheus e dashboard Grafana
-
-## Reconciliação contábil
-
-A DAG `reconciliacao_contabil` (05:00) compara core banking (PostgreSQL) vs data
-lake (ClickHouse): saldos por conta, transações por dia e PIX/BACEN SPI. Quando
-a divergência ultrapassa `RECONCILIACAO_LIMIAR_PCT` (padrão 0.01%), a tarefa
-falha e os alertas do `alertas_aurix.py` são disparados.
-
-Os relatórios são persistidos em `artifacts/reconciliation/*.json` e expostos
-como métricas Prometheus (`aurix_reconciliacao_*`) pelo exporter:
-
-```bash
-cd reconciliation
-pip install -r requirements.txt
-python -m reconciliation.exporter --once          # textfile (node_exporter)
-python -m reconciliation.exporter --port 9102     # HTTP scrape
-```
-
-O dashboard `reconciliation/grafana/aurix-reconciliacao-dashboard.json`
-monitora status, divergências por escopo e alertas. As regras de alerta
-(`ReconciliacaoDivergencias`, `ReconciliacaoAusente`) e o job `reconciliacao`
-no Prometheus ficam em `aurix-infrastructure`.
 
 ## Relacionados
 
-- [aurix-data-platform](https://github.com/aureus-platform/aurix-data-platform)
-- [aurix-ml](https://github.com/aureus-platform/aurix-ml)
-- [aurix-core-banking](https://github.com/aureus-platform/aurix-core-banking)
+- [aurix-data-platform](https://github.com/aurix-core-banking/aurix-data-platform)
+- [aurix-infrastructure](https://github.com/aurix-core-banking/aurix-infrastructure)
+- [aurix-ml](https://github.com/aurix-core-banking/aurix-ml)
