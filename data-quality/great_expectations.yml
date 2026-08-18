@@ -1,0 +1,249 @@
+# ============================================================
+# Great Expectations — Data Quality Suite para Aurix
+# Validações de regras de negócio bancário
+# ============================================================
+# Uso:
+#   python -m pytest data-quality/test_data_quality.py -v
+#   python data-quality/great_expectations_runner.py
+# ============================================================
+
+version: 0.38
+datasource_type: postgresql
+datasource_name: aurix_datasource
+
+# Configuração da fonte de dados
+datasource:
+  postgresql:
+    class_name: SqlAlchemyDatasource
+    connection_string: postgresql+psycopg2://aurix:aurix@localhost:5432/aurix
+    batch_kwargs:
+      table: contas
+
+# Expectation Suites
+expectation_suites:
+  # ═══════════════════════════════════════════════════════════
+  # SUITE: contas
+  # ═══════════════════════════════════════════════════════════
+  contas:
+    datasource: aurix_datasource
+    table: contas
+    expectations:
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: id
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: cliente_id
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: tipo_conta
+      - expectation_type: expect_column_values_to_be_unique
+        kwargs:
+          column: id
+      - expectation_type: expect_column_values_to_be_in_set
+        kwargs:
+          column: tipo_conta
+          value_set: ["CORRENTE", "POUPANCA", "SALARIO", "INVESTIMENTO"]
+      - expectation_type: expect_column_values_to_be_in_set
+        kwargs:
+          column: status
+          value_set: ["ATIVA", "INATIVA", "BLOQUEADA", "ENCERRADA"]
+      - expectation_type: expect_column_values_to_be_unique
+        kwargs:
+          column: numero_conta
+      - expectation_type: expect_column_values_to_match_regex
+        kwargs:
+          column: numero_conta
+          regex: "^\\d{6,12}$"
+      - expectation_type: expect_column_values_to_be_between
+        kwargs:
+          column: saldo
+          min_value: -100000
+          max_value: 10000000
+      - expectation_type: expect_table_row_count_to_be_between
+        kwargs:
+          min_value: 1
+          max_value: 10000000
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: tenant_id
+      - expectation_type: expect_column_value_lengths_to_be_between
+        kwargs:
+          column: tenant_id
+          min_value: 1
+          max_value: 50
+
+  # ═══════════════════════════════════════════════════════════
+  # SUITE: clientes
+  # ═══════════════════════════════════════════════════════════
+  clientes:
+    datasource: aurix_datasource
+    table: clientes
+    expectations:
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: id
+      - expectation_type: expect_column_values_to_be_unique
+        kwargs:
+          column: id
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: nome_completo
+      - expectation_type: expect_column_values_to_match_regex
+        kwargs:
+          column: cpf
+          regex: "^\\d{11}$"
+      - expectation_type: expect_column_values_to_be_unique
+        kwargs:
+          column: cpf
+      - expectation_type: expect_column_values_to_match_regex
+        kwargs:
+          column: email
+          regex: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+      - expectation_type: expect_column_values_to_match_regex
+        kwargs:
+          column: telefone
+          regex: "^\\d{10,11}$"
+      - expectation_type: expect_column_values_to_be_in_set
+        kwargs:
+          column: tipo_pessoa
+          value_set: ["PF", "PJ"]
+      - expectation_type: expect_column_values_to_be_in_set
+        kwargs:
+          column: status
+          value_set: ["ATIVO", "INATIVO", "BLOQUEADO", "PENDENTE_KYC"]
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: data_nascimento
+      - expectation_type: expect_column_values_to_match_regex
+        kwargs:
+          column: cnpj
+          regex: "^\\d{14}$"
+
+  # ═══════════════════════════════════════════════════════════
+  # SUITE: transacoes
+  # ═══════════════════════════════════════════════════════════
+  transacoes:
+    datasource: aurix_datasource
+    table: transacoes
+    expectations:
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: id
+      - expectation_type: expect_column_values_to_be_unique
+        kwargs:
+          column: id
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: conta_id
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: tipo_transacao
+      - expectation_type: expect_column_values_to_be_in_set
+        kwargs:
+          column: tipo_transacao
+          value_set:
+            - "PIX_ENVIADO"
+            - "PIX_RECEBIDO"
+            - "TED_ENVIADO"
+            - "TED_RECEBIDO"
+            - "DOC_ENVIADO"
+            - "DOC_RECEBIDO"
+            - "DEPOSITO"
+            - "SAQUE"
+            - "TRANSFERENCIA"
+            - "PAGAMENTO"
+            - "TARIFA"
+            - "RENDIMENTO"
+      - expectation_type: expect_column_values_to_be_in_set
+        kwargs:
+          column: status
+          value_set: ["PENDENTE", "PROCESSADA", "CANCELADA", "FALHOU", "ESTORNADA"]
+      - expectation_type: expect_column_values_to_be_between
+        kwargs:
+          column: valor
+          min_value: 0.01
+          max_value: 50000000
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: data_transacao
+      - expectation_type: expect_column_values_to_match_regex
+        kwargs:
+          column: canal
+          regex: "^(MOBILE|WEB|CORRETORA|API|BACKOFFICE|ATM)$"
+      - expectation_type: expect_column_pair_values_A_to_be_greater_than_B
+        kwargs:
+          column_A: data_transacao
+          column_B: created_at
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: tenant_id
+
+  # ═══════════════════════════════════════════════════════════
+  # SUITE: pix_pagamentos
+  # ═══════════════════════════════════════════════════════════
+  pix_pagamentos:
+    datasource: aurix_datasource
+    table: pix_pagamentos
+    expectations:
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: id
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: chave_pix
+      - expectation_type: expect_column_values_to_be_in_set
+        kwargs:
+          column: tipo_chave_pix
+          value_set: ["CPF", "CNPJ", "EMAIL", "TELEFONE", "CHAVE_ALEATORIA"]
+      - expectation_type: expect_column_values_to_be_between
+        kwargs:
+          column: valor
+          min_value: 0.01
+          max_value: 50000000
+      - expectation_type: expect_column_values_to_be_in_set
+        kwargs:
+          column: status
+          value_set: ["PENDENTE", "CONFIRMADA", "FALHOU", "CANCELADA", "DEVOLVIDA"]
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: ispb_origem
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: ispb_destino
+
+  # ═══════════════════════════════════════════════════════════
+  # SUITE: credito_solicitacoes
+  # ═══════════════════════════════════════════════════════════
+  credito_solicitacoes:
+    datasource: aurix_datasource
+    table: credito_solicitacoes
+    expectations:
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: id
+      - expectation_type: expect_column_values_to_be_in_set
+        kwargs:
+          column: tipo_credito
+          value_set: ["CONSIGNADO", "FINANCIAMENTO", "CREDITO_PESSOAL", "CARTAO_CREDITO", "CHEQUE_ESPECIAL"]
+      - expectation_type: expect_column_values_to_be_between
+        kwargs:
+          column: valor_solicitado
+          min_value: 100
+          max_value: 5000000
+      - expectation_type: expect_column_values_to_be_between
+        kwargs:
+          column: prazo_meses
+          min_value: 1
+          max_value: 360
+      - expectation_type: expect_column_values_to_be_in_set
+        kwargs:
+          column: status
+          value_set:
+            - "SOLICITADO"
+            - "EM_ANALISE"
+            - "APROVADO"
+            - "REPROVADO"
+            - "LIBERADO"
+            - "CONTRATO_ASSINADO"
+            - "LIQUIDADO"
