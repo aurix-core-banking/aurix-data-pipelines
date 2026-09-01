@@ -9,6 +9,7 @@ from pyspark.sql.types import *
 from pyspark.streaming import StreamingContext
 from pyspark.sql.streaming import DataStreamWriter
 import json
+import os
 from datetime import datetime
 
 class TransactionsProcessor:
@@ -143,23 +144,30 @@ class TransactionsProcessor:
         }
     
     def write_to_clickhouse(self, df, table_name):
-        """Escreve dados no ClickHouse"""
+        """Escreve dados no ClickHouse (credenciais via variaveis de ambiente)."""
+        clickhouse_jdbc = os.environ.get(
+            "CLICKHOUSE_JDBC_URL",
+            "jdbc:clickhouse://clickhouse:8123/aurix_analytics"
+        )
+        clickhouse_user = os.environ.get("CLICKHOUSE_USER", "aurix")
+        clickhouse_password = os.environ.get("CLICKHOUSE_PASSWORD", "aurix123")
         return df.writeStream \
             .format("jdbc") \
-            .option("url", "jdbc:clickhouse://clickhouse:8123/aurix_analytics") \
+            .option("url", clickhouse_jdbc) \
             .option("dbtable", table_name) \
-            .option("user", "aurix") \
-            .option("password", "aurix123") \
+            .option("user", clickhouse_user) \
+            .option("password", clickhouse_password) \
             .option("driver", "ru.yandex.clickhouse.ClickHouseDriver") \
             .option("checkpointLocation", "/tmp/checkpoint/" + table_name) \
             .trigger(processingTime="30 seconds") \
             .start()
     
     def write_to_elasticsearch(self, df, index_name):
-        """Escreve dados no Elasticsearch"""
+        """Escreve dados no Elasticsearch (endereco via variavel de ambiente)."""
+        es_nodes = os.environ.get("ELASTICSEARCH_NODES", "elasticsearch:9200")
         return df.writeStream \
             .format("es") \
-            .option("es.nodes", "elasticsearch:9200") \
+            .option("es.nodes", es_nodes) \
             .option("es.resource", index_name) \
             .option("es.mapping.id", "id") \
             .option("checkpointLocation", "/tmp/checkpoint/" + index_name) \
@@ -204,21 +212,24 @@ class TransactionsProcessor:
         )
         
         print("Pipeline iniciado. Aguardando dados...")
-        
-        # Aguardar finalização
+        writers = [
+            transactions_writer,
+            hourly_writer,
+            location_writer,
+            account_writer,
+            logs_writer,
+        ]
+
+        # awaitAnyTermination bloqueia enquanto qualquer query de streaming estiver
+        # ativa e retorna quando uma delas terminar (evita awaitTermination sequencial
+        # inalcançavel e permite parar todas as writers no KeyboardInterrupt).
         try:
-            transactions_writer.awaitTermination()
-            hourly_writer.awaitTermination()
-            location_writer.awaitTermination()
-            account_writer.awaitTermination()
-            logs_writer.awaitTermination()
+            self.spark.streams.awaitAnyTermination()
         except KeyboardInterrupt:
             print("Parando pipeline...")
-            transactions_writer.stop()
-            hourly_writer.stop()
-            location_writer.stop()
-            account_writer.stop()
-            logs_writer.stop()
+            for writer in writers:
+                writer.stop()
+            self.spark.stop()
     
     def run_batch_processing(self, input_path, output_path):
         """Executa processamento em lote"""
@@ -245,9 +256,9 @@ class TransactionsProcessor:
 if __name__ == "__main__":
     processor = TransactionsProcessor()
     
-    # Configurações
-    KAFKA_BOOTSTRAP_SERVERS = "kafka:9092"
-    TOPIC = "transacoes"
+    # Configurações via variáveis de ambiente
+    KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+    TOPIC = os.environ.get("KAFKA_TRANSACTIONS_TOPIC", "transacoes")
     
     # Executar pipeline de streaming
     processor.run_streaming_pipeline(KAFKA_BOOTSTRAP_SERVERS, TOPIC)

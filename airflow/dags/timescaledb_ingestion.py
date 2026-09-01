@@ -4,16 +4,18 @@ TimescaleDB Ingestion DAG
 This DAG performs two main ingestion pipelines into TimescaleDB hypertables:
 
 1. ingest_transaction_metrics (runs every minute)
-   - Simulates consuming transaction events from a Kafka topic "transacoes"
-   - Validates required fields, routing invalid records to the dead-letter queue
+   - Consumes real transaction events from the Kafka topic "core.transacao.realizada.v1"
+   - Validates required fields, publishing invalid records to the dead-letter queue
      topic "timescaledb_ingestion_dlq"
    - Aggregates valid transactions by 1-minute windows
    - Inserts aggregated metrics into the "metricas_transacoes" hypertable
+   - Falha hard se o Kafka estiver indisponivel (sem dados simulados)
 
 2. sync_system_metrics (runs every 5 minutes)
-   - Queries the Prometheus metrics endpoint (simulated)
-   - Parses system-level metrics (CPU, memory, disk, connections)
+   - Queries the real Prometheus API (PROMETHEUS_URL) via PromQL
+   - Parses node/postgres metrics (CPU, memory, disk, conexoes, etc.)
    - Inserts raw metric samples into the "metricas_sistema" hypertable
+   - Falha hard se o Prometheus estiver indisponivel
 """
 
 from datetime import datetime, timedelta
@@ -48,8 +50,7 @@ def get_timescaledb_connection():
 
 def ingest_transaction_metrics():
     import json
-    import random
-    from datetime import datetime, timedelta
+    from datetime import datetime
 
     conn = get_timescaledb_connection()
     cur = conn.cursor()
@@ -69,48 +70,38 @@ def ingest_transaction_metrics():
     cur.execute("SELECT create_hypertable('metricas_transacoes', 'tempo', if_not_exists => TRUE);")
     conn.commit()
 
-    # Consume real transactions from Kafka
-    from kafka import KafkaConsumer
+    # Consume real transactions from Kafka (sem fallback simulado: falha hard)
+    from kafka import KafkaConsumer, KafkaProducer
     import json as json_module
 
     bootstrap = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    dlq_topic = os.environ.get("TIMESCALEDB_INGESTION_DLQ_TOPIC", "timescaledb_ingestion_dlq")
     transactions = []
     now = datetime.utcnow()
 
-    try:
-        consumer = KafkaConsumer(
-            "core.transacao.realizada.v1",
-            bootstrap_servers=bootstrap,
-            auto_offset_reset="latest",
-            enable_auto_commit=True,
-            group_id="timescaledb_ingestion",
-            consumer_timeout_ms=10000,
-            value_deserializer=lambda m: json_module.loads(m.decode("utf-8"))
-        )
-        for msg in consumer:
-            data = msg.value
-            transactions.append({
-                "transaction_id": data.get("eventId") or msg.offset,
-                "timestamp": data.get("timestamp", now.isoformat()),
-                "tipo": data.get("tipoTransacao") or data.get("eventType", "DESCONHECIDO"),
-                "valor": float(data.get("valor", 0)),
-                "cliente_id": data.get("clienteId", 0),
-            })
-            if len(transactions) >= 100:
-                break
-        consumer.close()
-    except Exception as e:
-        print(f"Kafka indisponivel, usando fallback: {e}")
-        for _ in range(random.randint(5, 20)):
-            transactions.append({
-                "transaction_id": random.randint(10000, 99999),
-                "timestamp": (now - timedelta(seconds=random.randint(0, 60))).isoformat(),
-                "tipo": random.choice(["CREDITO", "DEBITO", "PIX", "TED", "DOC"]),
-                "valor": round(random.uniform(10.0, 50000.0), 2),
-                "cliente_id": random.randint(1, 1000),
-            })
+    consumer = KafkaConsumer(
+        "core.transacao.realizada.v1",
+        bootstrap_servers=bootstrap,
+        auto_offset_reset="latest",
+        enable_auto_commit=True,
+        group_id="timescaledb_ingestion",
+        consumer_timeout_ms=10000,
+        value_deserializer=lambda m: json_module.loads(m.decode("utf-8"))
+    )
+    for msg in consumer:
+        data = msg.value
+        transactions.append({
+            "transaction_id": data.get("eventId") or msg.offset,
+            "timestamp": data.get("timestamp", now.isoformat()),
+            "tipo": data.get("tipoTransacao") or data.get("eventType", "DESCONHECIDO"),
+            "valor": float(data.get("valor", 0)),
+            "cliente_id": data.get("clienteId", 0),
+        })
+        if len(transactions) >= 100:
+            break
+    consumer.close()
 
-    # Dead-letter queue: separate records with missing required fields
+    # Dead-letter queue: publish registros invalidos ao topico DLQ real
     required_fields = {"transaction_id", "timestamp", "tipo", "valor"}
     valid = []
     dlq = []
@@ -121,9 +112,15 @@ def ingest_transaction_metrics():
             valid.append(t)
 
     if dlq:
-        print(f"[DLQ] Routing {len(dlq)} invalid records to timescaledb_ingestion_dlq")
+        producer = KafkaProducer(
+            bootstrap_servers=bootstrap,
+            value_serializer=lambda v: json_module.dumps(v).encode("utf-8")
+        )
         for record in dlq:
-            print(f"[DLQ] {json.dumps(record)}")
+            producer.send(dlq_topic, record)
+        producer.flush()
+        producer.close()
+        print(f"[DLQ] {len(dlq)} registros invalidos publicados em {dlq_topic}")
 
     # Aggregate valid transactions by 1-minute window
     window_key = now.replace(second=0, microsecond=0)
@@ -165,8 +162,14 @@ def ingest_transaction_metrics():
 
 
 def sync_system_metrics():
-    import random
+    import json as json_module
     from datetime import datetime
+
+    prometheus_url = os.environ.get("PROMETHEUS_URL")
+    if not prometheus_url:
+        raise RuntimeError(
+            "PROMETHEUS_URL nao configurada. Metricas de sistema simuladas nao sao mais permitidas."
+        )
 
     conn = get_timescaledb_connection()
     cur = conn.cursor()
@@ -186,19 +189,43 @@ def sync_system_metrics():
 
     now = datetime.utcnow()
 
-    # Simulated Prometheus metrics scrape
-    metrics = {
-        "cpu_usage_percent": round(random.uniform(5.0, 95.0), 2),
-        "memory_usage_percent": round(random.uniform(20.0, 90.0), 2),
-        "disk_usage_percent": round(random.uniform(30.0, 85.0), 2),
-        "active_connections": random.randint(5, 150),
-        "transactions_per_second": round(random.uniform(10.0, 500.0), 2),
-        "query_latency_ms": round(random.uniform(1.0, 200.0), 2),
+    # Consultas reais ao Prometheus (node_exporter e postgres_exporter)
+    queries = {
+        "cpu_usage_percent":
+            '100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)',
+        "memory_usage_percent":
+            '(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100',
+        "disk_usage_percent":
+            'avg by (instance) (1 - node_filesystem_avail_bytes{mountpoint="/"} '
+            '/ node_filesystem_size_bytes{mountpoint="/"}) * 100',
+        "active_connections":
+            'sum(pg_stat_database_numbackends)',
+        "transactions_per_second":
+            'sum(rate(node_context_switches_total[5m]))',
+        "query_latency_ms":
+            'avg(node_scrape_collector_duration_seconds) * 1000',
     }
 
-    labels = json.dumps({"source": "prometheus", "host": os.environ.get("HOSTNAME", "timescaledb")})
+    import requests
 
-    for name, value in metrics.items():
+    labels = json_module.dumps({"source": "prometheus", "url": prometheus_url})
+
+    for name, promql in queries.items():
+        try:
+            resp = requests.get(
+                f"{prometheus_url.rstrip('/')}/api/v1/query",
+                params={"query": promql},
+                timeout=15,
+            )
+            resp.raise_for_status()
+        except Exception as e:
+            raise RuntimeError(f"Prometheus indisponivel para '{name}': {e}") from e
+
+        results = resp.json().get("data", {}).get("result", [])
+        if not results:
+            print(f"[sync_system_metrics] {name}: nenhuma serie encontrada, ignorando")
+            continue
+        value = float(results[0].get("value", [0, 0])[1])
         cur.execute(
             """
             INSERT INTO metricas_sistema (tempo, nome_metrica, valor, labels)
@@ -214,7 +241,7 @@ def sync_system_metrics():
     conn.commit()
     cur.close()
     conn.close()
-    print(f"[sync_system_metrics] Inserted {len(metrics)} system metrics at {now.isoformat()}")
+    print(f"[sync_system_metrics] Inserted real Prometheus metrics at {now.isoformat()}")
 
 
 dag = DAG(
