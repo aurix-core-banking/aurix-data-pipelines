@@ -6,7 +6,7 @@ aurix:
       host: "{{ env_var('DBT_POSTGRES_HOST', 'localhost') }}"
       port: "{{ env_var('DBT_POSTGRES_PORT', '5432') | int }}"
       user: "{{ env_var('DBT_POSTGRES_USER', 'aurix_user') }}"
-      password: "{{ env_var('DBT_POSTGRES_PASSWORD', 'aurix_secure_password') }}"
-      dbname: "{{ env_var('DBT_POSTGRES_DB', 'aurix') }}"
+      password: "{{ env_var('DBT_POSTGRES_PASSWORD', 'aurix_dev_password') }}"
+      dbname: "{{ env_var('DBT_POSTGRES_DB', 'aurix_db') }}"
       schema: "{{ env_var('DBT_POSTGRES_SCHEMA', 'aurix') }}"
       threads: 4

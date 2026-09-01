@@ -1,0 +1,84 @@
+version: 2
+
+models:
+  - name: stg_clientes
+    description: "Dados brutos de clientes normalizados e renomeados."
+    columns:
+      - name: cliente_id
+        tests:
+          - unique
+          - not_null
+      - name: tipo_pessoa
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["FISICA", "JURIDICA"]
+      - name: status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["ATIVO", "INATIVO", "BLOQUEADO", "SUSPENSO"]
+
+  - name: stg_contas
+    description: "Dados brutos de contas normalizados e renomeados."
+    columns:
+      - name: id
+        tests:
+          - unique
+          - not_null
+      - name: numero_conta
+        tests:
+          - unique
+          - not_null
+      - name: cliente_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref("stg_clientes")
+                field: cliente_id
+      - name: tipo_conta
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["CORRENTE", "POUPANCA", "SALARIO", "EMPRESARIAL"]
+      - name: status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["ATIVA", "INATIVA", "BLOQUEADA", "SUSPENSA", "FECHADA"]
+
+  - name: stg_transacoes
+    description: "Dados brutos de transacoes normalizados e renomeados."
+    columns:
+      - name: id
+        tests:
+          - unique
+          - not_null
+      - name: valor
+        tests:
+          - not_null
+      - name: tipo_transacao
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["PIX", "TED", "DOC", "SAQUE", "DEPOSITO", "TRANSFERENCIA_INTERNA", "PAGAMENTO_BOLETO", "PAGAMENTO_CARTAO"]
+      - name: status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["PENDENTE", "PROCESSADA", "CANCELADA", "FALHADA", "REVERTIDA"]
+      - name: conta_origem_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref("stg_contas")
+                field: id
+      - name: conta_destino_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref("stg_contas")
+                field: id

@@ -1,0 +1,60 @@
+version: 2
+
+models:
+  - name: gold_clientes_risco
+    description: "Perfil de risco por cliente baseado no volume movimentado em 30 dias."
+    columns:
+      - name: cliente_id
+        tests:
+          - unique
+          - not_null
+      - name: nivel_risco_volume
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["ALTO", "MEDIO", "BAIXO"]
+
+  - name: gold_contas_resumo
+    description: "Resumo diario de contas por tipo e status."
+    columns:
+      - name: data
+        tests:
+          - not_null
+      - name: tipo_conta
+        tests:
+          - not_null
+      - name: status
+        tests:
+          - not_null
+
+  - name: gold_transacoes_diarias
+    description: "Metricas diarias de transacoes por tipo (volume, ticket, contas unicas)."
+    columns:
+      - name: data
+        tests:
+          - not_null
+      - name: tipo_transacao
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["PIX", "TED", "DOC", "SAQUE", "DEPOSITO", "TRANSFERENCIA_INTERNA", "PAGAMENTO_BOLETO", "PAGAMENTO_CARTAO"]
+      - name: total_transacoes
+        tests:
+          - not_null
+
+  - name: gold_compliance_aml
+    description: "Indicadores de compliance PLD/AML por cliente (volume, transacoes acima de 50k, nivel de atencao)."
+    columns:
+      - name: cliente_id
+        tests:
+          - unique
+          - not_null
+      - name: documento
+        tests:
+          - not_null
+      - name: nivel_atencao_compliance
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["ALTA", "MEDIA", "BAIXA"]

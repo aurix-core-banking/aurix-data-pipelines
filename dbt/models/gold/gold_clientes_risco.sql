@@ -14,15 +14,15 @@ transacoes_agg as (
     join clientes c on t.conta_origem_id in (
         select id from {{ ref('stg_contas') }} where cliente_id = c.cliente_id
     )
-    where t.data_transacao >= current_date - interval '30 days'
+    where {{ filtro_ultimos_dias('t.data_transacao', 30) }}
     group by c.cliente_id
 ),
 
 risco as (
     select
         c.*,
-        coalesce(ta.total_transacoes_30d, 0) as total_transacoes_30d,
-        coalesce(ta.volume_30d, 0) as volume_30d,
+        {{ zero_if_null('ta.total_transacoes_30d') }} as total_transacoes_30d,
+        {{ zero_if_null('ta.volume_30d') }} as volume_30d,
         ta.ticket_medio_30d,
         ta.maior_transacao_30d,
         ta.tipos_utilizados,

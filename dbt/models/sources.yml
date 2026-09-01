@@ -1,8 +1,112 @@
 version: 2
+
 sources:
   - name: aurix
+    description: "Banco de dados principal do core banking (schema aurix). Schema gerenciado por JPA/Hibernate nos servicos."
     schema: aurix
+    database: "{{ env_var('DBT_POSTGRES_DB', 'aurix') }}"
     tables:
-      - name: contas
       - name: clientes
+        description: "Clientes PF/PJ cadastrados."
+        loaded_at_field: data_atualizacao
+        freshness:
+          warn_after:
+            count: 7
+            period: day
+          error_after:
+            count: 14
+            period: day
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+          - name: tipo_pessoa
+            tests:
+              - accepted_values:
+                  arguments:
+                    values: ["FISICA", "JURIDICA"]
+          - name: status
+            tests:
+              - accepted_values:
+                  arguments:
+                    values: ["ATIVO", "INATIVO", "BLOQUEADO", "SUSPENSO"]
+
+      - name: contas
+        description: "Contas dos clientes."
+        loaded_at_field: data_atualizacao
+        freshness:
+          warn_after:
+            count: 24
+            period: hour
+          error_after:
+            count: 7
+            period: day
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+          - name: numero_conta
+            tests:
+              - unique
+              - not_null
+          - name: cliente_id
+            tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source("aurix", "clientes")
+                    field: id
+          - name: status
+            tests:
+              - accepted_values:
+                  arguments:
+                    values: ["ATIVA", "INATIVA", "BLOQUEADA", "SUSPENSA", "FECHADA"]
+          - name: tipo_conta
+            tests:
+              - accepted_values:
+                  arguments:
+                    values: ["CORRENTE", "POUPANCA", "SALARIO", "EMPRESARIAL"]
+
       - name: transacoes
+        description: "Transacoes financeiras movimentadas entre contas."
+        loaded_at_field: data_transacao
+        freshness:
+          warn_after:
+            count: 6
+            period: hour
+          error_after:
+            count: 24
+            period: hour
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+          - name: valor
+            tests:
+              - not_null
+          - name: tipo_transacao
+            tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ["PIX", "TED", "DOC", "SAQUE", "DEPOSITO", "TRANSFERENCIA_INTERNA", "PAGAMENTO_BOLETO", "PAGAMENTO_CARTAO"]
+          - name: status
+            tests:
+              - accepted_values:
+                  arguments:
+                    values: ["PENDENTE", "PROCESSADA", "CANCELADA", "FALHADA", "REVERTIDA"]
+          - name: conta_origem_id
+            tests:
+              - relationships:
+                  arguments:
+                    to: source("aurix", "contas")
+                    field: id
+          - name: conta_destino_id
+            tests:
+              - relationships:
+                  arguments:
+                    to: source("aurix", "contas")
+                    field: id

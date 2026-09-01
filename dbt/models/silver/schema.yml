@@ -1,0 +1,56 @@
+version: 2
+
+models:
+  - name: silver_clientes
+    description: "Clientes enriquecidos com agregados de contas."
+    columns:
+      - name: cliente_id
+        tests:
+          - unique
+          - not_null
+      - name: total_contas
+        tests:
+          - not_null
+
+  - name: silver_contas
+    description: "Contas ativas prontas para consumo analitico."
+    columns:
+      - name: id
+        tests:
+          - unique
+          - not_null
+      - name: cliente_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref("silver_clientes")
+                field: cliente_id
+
+  - name: silver_transacoes
+    description: "Transacoes enriquecidas com faixa de valor, hora e dia da semana."
+    columns:
+      - name: id
+        tests:
+          - unique
+          - not_null
+      - name: valor
+        tests:
+          - not_null
+      - name: faixa_valor
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["ALTO", "MEDIO", "BAIXO"]
+      - name: conta_origem_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref("silver_contas")
+                field: id
+      - name: conta_destino_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref("silver_contas")
+                field: id

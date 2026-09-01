@@ -15,8 +15,8 @@ contas_agg as (
 enriched as (
     select
         c.*,
-        coalesce(ca.total_contas, 0) as total_contas,
-        coalesce(ca.saldo_total, 0) as saldo_total,
+        {{ zero_if_null('ca.total_contas') }} as total_contas,
+        {{ zero_if_null('ca.saldo_total') }} as saldo_total,
         ca.ultima_conta_abertura
     from clientes c
     left join contas_agg ca on c.cliente_id = ca.cliente_id
